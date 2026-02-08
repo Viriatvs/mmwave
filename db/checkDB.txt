@@ -1,0 +1,13 @@
+// 1
+docker exec -it mmwave-mysql bash
+
+//2 Password: app_password
+
+mysql -h 127.0.0.1 -P 3306 -u app_user -p
+
+//3
+
+USE mmwave;
+SHOW TABLES;
+SELECT * FROM sensor_events ORDER BY id DESC LIMIT 10;
+SELECT * FROM room_status;

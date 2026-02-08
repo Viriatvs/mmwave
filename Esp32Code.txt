@@ -1,0 +1,104 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <MyLD2410.h>
+
+#define RADAR_RX 16
+#define RADAR_TX 17
+#define LED_PIN  25
+#define STABLE_TIME_MS 3000
+
+const char* WIFI_SSID = "MauHouse";
+const char* WIFI_PASS = "thegreatcornholio";
+const char* SERVER_URL = "http://192.168.1.241:8000/sensor/update";
+
+MyLD2410 sensor(Serial2);
+
+int currentState = 0;
+int candidateState = 0;
+unsigned long candidateSince = 0;
+
+void startWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.println("WiFi starting...");
+}
+
+void handleWiFi() {
+  static wl_status_t lastStatus = WL_IDLE_STATUS;
+  wl_status_t s = WiFi.status();
+
+  if (s != lastStatus) {
+    lastStatus = s;
+    if (s == WL_CONNECTED) {
+      Serial.print("WiFi connected. IP: ");
+      Serial.println(WiFi.localIP());
+    }
+  }
+}
+
+void sendStateHTTP(int state) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  http.begin("http://192.168.1.241:8000/sensor/update");   // <-- your endpoint
+  http.addHeader("Content-Type", "application/json");
+
+  String payload = "{";
+  payload += "\"sensor_id\":\"sensor-1\",";
+  payload += "\"token\":\"changeme\",";
+  payload += "\"room_name\":\"Lab\",";
+  payload += "\"state\":" + String(state);
+  payload += "}";
+
+  int httpCode = http.POST(payload);
+  http.end();
+
+  Serial.print("HTTP POST state=");
+  Serial.print(state);
+  Serial.print(" code=");
+  Serial.println(httpCode);
+}
+
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  startWiFi();
+
+  Serial2.begin(256000, SERIAL_8N1, RADAR_RX, RADAR_TX);
+  delay(2000);
+
+  if (!sensor.begin()) {
+    while (true) {}
+  }
+}
+
+void loop() {
+  handleWiFi();
+
+  if (sensor.check() == MyLD2410::Response::DATA) {
+
+    int rawDetected =
+      (sensor.movingTargetDetected() || sensor.stationaryTargetDetected()) ? 1 : 0;
+
+    if (rawDetected != candidateState) {
+      candidateState = rawDetected;
+      candidateSince = millis();
+    }
+
+    if (candidateState != currentState &&
+        millis() - candidateSince >= STABLE_TIME_MS) {
+
+      currentState = candidateState;
+
+      digitalWrite(LED_PIN, currentState ? HIGH : LOW);
+      Serial.println(currentState);
+
+      // send HTTP only on confirmed change
+      sendStateHTTP(currentState);
+    }
+  }
+}
